@@ -26,7 +26,14 @@ const RANKS: [u64; 8] = [
 
 const RANK_MATRIX: [&str; 8] = ["a", "b", "c", "d", "e", "f", "g", "h"];
 
-#[derive(Clone, Copy, Debug)]
+fn square_number_from_str(str: &str) -> Option<u8> {
+    Some(
+        str.chars().nth(0)?.to_digit(16)? as u8 - 10 * 8 + str.chars().nth(1)?.to_digit(10)? as u8
+            - 1,
+    )
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
 enum Color {
     Black,
     White,
@@ -43,7 +50,7 @@ impl Color {
 
 use Color::*;
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 enum Piece {
     Pawn(Color),
     Knight(Color),
@@ -130,10 +137,28 @@ impl Piece {
         }
     }
 
+    fn from_char(char: char) -> Option<Self> {
+        match char {
+            'P' => Some(Pawn(White)),
+            'p' => Some(Pawn(Black)),
+            'N' => Some(Knight(White)),
+            'n' => Some(Knight(Black)),
+            'B' => Some(Bishop(White)),
+            'b' => Some(Bishop(Black)),
+            'R' => Some(Rook(White)),
+            'r' => Some(Rook(Black)),
+            'Q' => Some(Queen(White)),
+            'q' => Some(Queen(Black)),
+            'K' => Some(King(White)),
+            'k' => Some(King(Black)),
+            _ => None,
+        }
+    }
 }
 
 use Piece::*;
 
+#[derive(Debug, PartialEq)]
 struct GameState {
     bitboards: [Bitboard; 12],
     active_color: Color,
@@ -239,12 +264,49 @@ impl FromStr for GameState {
         let mut bitboards = [0x0; 12];
         let board: &str = splits.get(0).ok_or("No board state")?;
         for (rank, file_val) in board.split("/").enumerate() {
-            for (file, piece) in file_val.chars().enumerate() {
-                if let Some(piece) = piece {
-                    bitboards[piece.index
+            let mut file = 0;
+            for piece in file_val.chars() {
+                if let Some(piece) = Piece::from_char(piece) {
+                    bitboards[piece.index()] |= 1 << ((7 - rank) * 8 + (7 - file));
+                    file += 1;
+                } else if piece.is_numeric() {
+                    file += piece.to_string().parse::<usize>().map_err(|parse_int_error| format!("Could not parse character a number: {parse_int_error}"))?;
                 }
             }
         }
+        let active_color = if *splits.get(1).ok_or("No color")? == "w" {
+            White
+        } else {
+            Black
+        };
+        let mut castling_rights = [false; 4];
+        let castling_rights_str = splits.get(2).ok_or("No castling rights")?;
+        if castling_rights_str.contains("K") {
+            castling_rights[0] = true;
+        }
+        if castling_rights_str.contains("k") {
+            castling_rights[2] = true;
+        }
+        if castling_rights_str.contains("Q") {
+            castling_rights[1] = true;
+        }
+        if castling_rights_str.contains("q") {
+            castling_rights[3] = true;
+        }
+        let en_passant_target_str = *splits.get(3).ok_or("No en passant target")?;
+        let en_passant_target = if en_passant_target_str == "-" {
+            None
+        } else {
+            square_number_from_str(en_passant_target_str)
+        };
+        Ok(GameState {
+            bitboards,
+            active_color,
+            castling_rights,
+            en_passant_target,
+            half_move_clock: splits.get(4).ok_or("No half move clock")?.parse::<u8>().map_err(|parse_int_error| format!("Could not parse half move clock: {parse_int_error}"))?,
+            full_move_number: splits.get(5).ok_or("No full move number")?.parse::<u8>().map_err(|parse_int_error| format!("Could not parse full move number: {parse_int_error}"))?,
+        })
     }
 }
 
@@ -286,6 +348,18 @@ mod test {
         assert_eq!(
             "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
             format!("{game_state}")
+        );
+    }
+
+    #[test]
+    fn board_from_fen() {
+        let game_state = GameState::default();
+        let default_fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+        let actual = default_fen.parse::<GameState>();
+        assert!(!actual.is_err());
+        assert_eq!(
+            game_state,
+            actual.unwrap()
         );
     }
 }
